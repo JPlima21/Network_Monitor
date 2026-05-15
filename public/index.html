@@ -19,10 +19,10 @@
             <section class="hero panel">
                 <div class="hero-actions">
                     <div class="live-card">
-                        <strong id="next-update-timer">Próxima atualização em 30s</strong>
-                        <span id="last-global-update">Carregando medições...</span>
+                        <strong id="next-update-timer">Proxima atualizacao em 30s</strong>
+                        <span id="last-global-update">Carregando medicoes...</span>
                     </div>
-                    <button id="add-service-button" class="primary-button" type="button">Adicionar serviço</button>
+                    <button id="add-service-button" class="primary-button" type="button">Adicionar servico</button>
                 </div>
             </section>
 
@@ -30,10 +30,10 @@
 
             <section class="section-head">
                 <div>
-                    <span class="section-kicker">Serviços monitorados</span>
-                    <h2>Saúde operacional em tempo real</h2>
+                    <span class="section-kicker">Servicos monitorados</span>
+                    <h2>Saude operacional em tempo real</h2>
                 </div>
-                <p id="services-caption">Carregando serviços...</p>
+                <p id="services-caption">Carregando servicos...</p>
             </section>
 
             <section id="services-grid" class="services-grid"></section>
@@ -44,11 +44,11 @@
         <div class="modal-card details-modal">
             <div class="details-header">
                 <div>
-                    <span class="section-kicker">Detalhes do serviço</span>
+                    <span class="section-kicker">Detalhes do servico</span>
                     <h3 id="detailsName">-</h3>
                     <p id="detailsHost">-</p>
                 </div>
-                <button id="close-details-button" class="icon-button" type="button" aria-label="Fechar detalhes">×</button>
+                <button id="close-details-button" class="icon-button" type="button" aria-label="Fechar detalhes">x</button>
             </div>
 
             <div id="detailsMetrics" class="details-metrics"></div>
@@ -56,8 +56,8 @@
             <div class="panel detail-chart-panel">
                 <div class="chart-panel-header">
                     <div>
-                        <span class="chart-caption">Evolução da latência</span>
-                        <strong id="detailsStatusLabel">Histórico recente</strong>
+                        <span class="chart-caption">Evolucao da latencia</span>
+                        <strong id="detailsStatusLabel">Historico recente</strong>
                     </div>
                     <span id="detailsThresholdLabel" class="muted-badge">-</span>
                 </div>
@@ -73,22 +73,32 @@
             <div class="form-header">
                 <div>
                     <span class="section-kicker">Cadastro</span>
-                    <h3 id="modalTitle">Adicionar serviço</h3>
+                    <h3 id="modalTitle">Adicionar servico</h3>
                 </div>
-                <button id="close-form-button" class="icon-button" type="button" aria-label="Fechar formulário">×</button>
+                <button id="close-form-button" class="icon-button" type="button" aria-label="Fechar formulario">x</button>
             </div>
 
             <input type="hidden" id="editServiceId">
 
             <div class="form-grid">
                 <label class="form-field">
-                    <span>Nome do serviço</span>
+                    <span>Nome do servico</span>
                     <input type="text" id="serviceName" placeholder="Ex: Link principal">
                 </label>
 
                 <label class="form-field">
+                    <span>Tipo de verificacao</span>
+                    <select id="serviceCheckType">
+                        <option value="ping">Ping (ICMP)</option>
+                        <option value="tcp">TCP</option>
+                        <option value="http">HTTP</option>
+                        <option value="https">HTTPS</option>
+                    </select>
+                </label>
+
+                <label class="form-field">
                     <span>Host ou IP</span>
-                    <input type="text" id="serviceHost" placeholder="Ex: 192.168.0.1">
+                    <input type="text" id="serviceHost" placeholder="Ex: 192.168.0.1 ou geridinss.dataprev.gov.br">
                 </label>
 
                 <label class="form-field">
@@ -96,8 +106,24 @@
                     <input type="number" id="serviceThreshold" placeholder="Ex: 100" value="100">
                 </label>
 
+                <div id="portFields" class="form-helper-box is-hidden">
+                    <label class="form-field">
+                        <span id="servicePortLabel">Porta TCP</span>
+                        <input type="number" id="servicePort" placeholder="Ex: 443">
+                        <small id="servicePortHint" class="form-hint">Se ficar vazio, o monitor usa a porta 443.</small>
+                    </label>
+                </div>
+
+                <div id="httpFields" class="form-helper-box is-hidden">
+                    <label class="form-field">
+                        <span>Caminho HTTP</span>
+                        <input type="text" id="serviceRequestPath" placeholder="Ex: / ou /login">
+                        <small class="form-hint">Opcional. Para HTTP/HTTPS, use o caminho da pagina ou endpoint.</small>
+                    </label>
+                </div>
+
                 <label class="form-field">
-                    <span>Imagem/logo do serviço</span>
+                    <span>Imagem/logo do servico</span>
                     <input type="file" id="serviceImageFile" accept="image/*">
                     <small id="serviceImageHint" class="form-hint">Selecione uma imagem local para substituir o avatar.</small>
                 </label>

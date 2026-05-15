@@ -6,6 +6,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -16,6 +17,7 @@ SERVICES_FILE = DATA_DIR / "services.json"
 PYTHON_HISTORY_FILE = DATA_DIR / "python_history.json"
 LEGACY_HISTORY_FILE = DATA_DIR / "history.json"
 LAST_RESET_FILE = DATA_DIR / "last_reset.txt"
+ALLOWED_CHECK_TYPES = {"ping", "tcp", "http", "https"}
 
 DEFAULT_SERVICES = [
     {
@@ -24,6 +26,9 @@ DEFAULT_SERVICES = [
         "host": "8.8.8.8",
         "threshold": 80,
         "imageUrl": "",
+        "checkType": "ping",
+        "port": None,
+        "requestPath": "/",
     },
     {
         "id": "cloudflare",
@@ -31,6 +36,9 @@ DEFAULT_SERVICES = [
         "host": "1.1.1.1",
         "threshold": 80,
         "imageUrl": "",
+        "checkType": "ping",
+        "port": None,
+        "requestPath": "/",
     },
 ]
 
@@ -39,6 +47,87 @@ def _slugify_name(name: str) -> str:
     normalized = "".join(char.lower() if char.isalnum() else "-" for char in name.strip())
     compact = "-".join(part for part in normalized.split("-") if part)
     return compact or "service"
+
+
+def _normalize_check_type(value: Any) -> str:
+    text = str(value or "ping").strip().lower()
+    return text if text in ALLOWED_CHECK_TYPES else "ping"
+
+
+def _normalize_request_path(value: Any) -> str:
+    path = str(value or "").strip()
+    if not path:
+        return "/"
+    return path if path.startswith("/") else f"/{path}"
+
+
+def _coerce_port(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+
+    port = int(value)
+    if not (1 <= port <= 65535):
+        raise ValueError("Port must be between 1 and 65535")
+    return port
+
+
+def _extract_url_parts(host_value: Any) -> dict[str, Any] | None:
+    host_text = str(host_value or "").strip()
+    if "://" not in host_text:
+        return None
+
+    parsed = urlsplit(host_text)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+
+    request_path = parsed.path or "/"
+    if parsed.query:
+        request_path = f"{request_path}?{parsed.query}"
+
+    return {
+        "scheme": parsed.scheme,
+        "host": parsed.hostname,
+        "port": parsed.port,
+        "requestPath": request_path,
+    }
+
+
+def _normalize_service_payload(service: dict[str, Any]) -> dict[str, Any]:
+    url_parts = _extract_url_parts(service.get("host"))
+    check_type = _normalize_check_type(service.get("checkType"))
+    host = str(service.get("host") or "").strip()
+    port_source = service.get("port")
+    request_path_source = service.get("requestPath")
+
+    if url_parts:
+        host = url_parts["host"]
+        if port_source in (None, ""):
+            port_source = url_parts["port"]
+        if request_path_source in (None, ""):
+            request_path_source = url_parts["requestPath"]
+        if service.get("checkType") in (None, ""):
+            check_type = url_parts["scheme"]
+
+    port = _coerce_port(port_source)
+    request_path = _normalize_request_path(request_path_source)
+
+    if check_type == "ping":
+        port = None
+        request_path = "/"
+    elif check_type == "tcp":
+        port = port or 443
+        request_path = "/"
+
+    return {
+        "id": str(service["id"]),
+        "name": str(service["name"]).strip(),
+        "host": host,
+        "threshold": int(service.get("threshold", 100)),
+        "imageUrl": str(service.get("imageUrl", "") or "").strip(),
+        "checkType": check_type,
+        "port": port,
+        "requestPath": request_path,
+    }
 
 
 class SqliteStorage:
@@ -87,7 +176,10 @@ class SqliteStorage:
                 name TEXT NOT NULL,
                 host TEXT NOT NULL,
                 threshold INTEGER NOT NULL,
-                image_url TEXT NOT NULL DEFAULT ''
+                image_url TEXT NOT NULL DEFAULT '',
+                check_type TEXT NOT NULL DEFAULT 'ping',
+                port INTEGER,
+                request_path TEXT NOT NULL DEFAULT '/'
             )
             """,
             commit=True,
@@ -126,6 +218,21 @@ class SqliteStorage:
         if "image_url" not in columns:
             self._execute(
                 "ALTER TABLE services ADD COLUMN image_url TEXT NOT NULL DEFAULT ''",
+                commit=True,
+            )
+        if "check_type" not in columns:
+            self._execute(
+                "ALTER TABLE services ADD COLUMN check_type TEXT NOT NULL DEFAULT 'ping'",
+                commit=True,
+            )
+        if "port" not in columns:
+            self._execute(
+                "ALTER TABLE services ADD COLUMN port INTEGER",
+                commit=True,
+            )
+        if "request_path" not in columns:
+            self._execute(
+                "ALTER TABLE services ADD COLUMN request_path TEXT NOT NULL DEFAULT '/'",
                 commit=True,
             )
 
@@ -168,42 +275,56 @@ class SqliteStorage:
         if isinstance(history, dict) and history:
             self.save_history(history)
 
+    def _service_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "host": row["host"],
+            "threshold": row["threshold"],
+            "imageUrl": row["image_url"] or "",
+            "checkType": _normalize_check_type(row["check_type"]),
+            "port": row["port"],
+            "requestPath": row["request_path"] or "/",
+        }
+
     def load_services(self) -> list[dict[str, Any]]:
         cursor = self._execute(
-            "SELECT id, name, host, threshold, image_url FROM services ORDER BY name ASC"
+            """
+            SELECT id, name, host, threshold, image_url, check_type, port, request_path
+            FROM services
+            ORDER BY name ASC
+            """
         )
-        return [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "host": row["host"],
-                "threshold": row["threshold"],
-                "imageUrl": row["image_url"] or "",
-            }
-            for row in cursor.fetchall()
-        ]
+        return [self._service_from_row(row) for row in cursor.fetchall()]
 
     def save_services(self, services: list[dict[str, Any]]) -> None:
+        normalized_services = [_normalize_service_payload(service) for service in services]
         with self._lock:
             self._connection.executemany(
                 """
-                INSERT INTO services (id, name, host, threshold, image_url)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO services (id, name, host, threshold, image_url, check_type, port, request_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     host = excluded.host,
                     threshold = excluded.threshold,
-                    image_url = excluded.image_url
+                    image_url = excluded.image_url,
+                    check_type = excluded.check_type,
+                    port = excluded.port,
+                    request_path = excluded.request_path
                 """,
                 [
                     (
-                        str(service["id"]),
-                        str(service["name"]),
-                        str(service["host"]),
-                        int(service.get("threshold", 100)),
-                        str(service.get("imageUrl", "") or ""),
+                        service["id"],
+                        service["name"],
+                        service["host"],
+                        service["threshold"],
+                        service["imageUrl"],
+                        service["checkType"],
+                        service["port"],
+                        service["requestPath"],
                     )
-                    for service in services
+                    for service in normalized_services
                 ],
             )
             self._connection.commit()
@@ -214,6 +335,9 @@ class SqliteStorage:
         host: str,
         threshold: int = 100,
         image_url: str = "",
+        check_type: str = "ping",
+        port: int | None = None,
+        request_path: str = "/",
     ) -> dict[str, Any]:
         with self._lock:
             existing_ids = {
@@ -228,17 +352,22 @@ class SqliteStorage:
                 service_id = f"{base}-{index}"
                 index += 1
 
-            service = {
-                "id": service_id,
-                "name": name,
-                "host": host,
-                "threshold": threshold,
-                "imageUrl": image_url,
-            }
+            service = _normalize_service_payload(
+                {
+                    "id": service_id,
+                    "name": name,
+                    "host": host,
+                    "threshold": threshold,
+                    "imageUrl": image_url,
+                    "checkType": check_type,
+                    "port": port,
+                    "requestPath": request_path,
+                }
+            )
             self._connection.execute(
                 """
-                INSERT INTO services (id, name, host, threshold, image_url)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO services (id, name, host, threshold, image_url, check_type, port, request_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     service["id"],
@@ -246,6 +375,9 @@ class SqliteStorage:
                     service["host"],
                     service["threshold"],
                     service["imageUrl"],
+                    service["checkType"],
+                    service["port"],
+                    service["requestPath"],
                 ),
             )
             self._connection.commit()
@@ -254,38 +386,24 @@ class SqliteStorage:
     def update_service(self, service_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         with self._lock:
             row = self._connection.execute(
-                "SELECT id, name, host, threshold, image_url FROM services WHERE id = ?",
+                """
+                SELECT id, name, host, threshold, image_url, check_type, port, request_path
+                FROM services
+                WHERE id = ?
+                """,
                 (service_id,),
             ).fetchone()
             if row is None:
                 return None
 
-            updated = {
-                "id": row["id"],
-                "name": row["name"],
-                "host": row["host"],
-                "threshold": row["threshold"],
-                "imageUrl": row["image_url"] or "",
-            }
-
-            if "name" in payload:
-                name = str(payload.get("name") or "").strip()
-                if name:
-                    updated["name"] = name
-            if "host" in payload:
-                host = str(payload.get("host") or "").strip()
-                if host:
-                    updated["host"] = host
-            if "threshold" in payload:
-                threshold = payload.get("threshold")
-                updated["threshold"] = int(threshold) if threshold not in (None, "") else 100
-            if "imageUrl" in payload:
-                updated["imageUrl"] = str(payload.get("imageUrl") or "").strip()
+            current = self._service_from_row(row)
+            merged = {**current, **payload, "id": service_id}
+            updated = _normalize_service_payload(merged)
 
             self._connection.execute(
                 """
                 UPDATE services
-                SET name = ?, host = ?, threshold = ?, image_url = ?
+                SET name = ?, host = ?, threshold = ?, image_url = ?, check_type = ?, port = ?, request_path = ?
                 WHERE id = ?
                 """,
                 (
@@ -293,6 +411,9 @@ class SqliteStorage:
                     updated["host"],
                     updated["threshold"],
                     updated["imageUrl"],
+                    updated["checkType"],
+                    updated["port"],
+                    updated["requestPath"],
                     service_id,
                 ),
             )
@@ -315,6 +436,9 @@ class SqliteStorage:
                         "name": None,
                         "host": None,
                         "threshold": row["service_threshold"],
+                        "checkType": None,
+                        "port": None,
+                        "requestPath": None,
                     },
                     "online": bool(row["online"]),
                     "status": row["status"],
@@ -335,11 +459,16 @@ class SqliteStorage:
         for service_entries in history.values():
             for entry in service_entries:
                 service_metadata = service_by_id.get(entry["service"]["id"])
-                if service_metadata:
-                    entry["service"]["name"] = service_metadata["name"]
-                    entry["service"]["host"] = service_metadata["host"]
-                    if entry["service"]["threshold"] is None:
-                        entry["service"]["threshold"] = service_metadata["threshold"]
+                if not service_metadata:
+                    continue
+
+                entry["service"]["name"] = service_metadata["name"]
+                entry["service"]["host"] = service_metadata["host"]
+                entry["service"]["checkType"] = service_metadata["checkType"]
+                entry["service"]["port"] = service_metadata["port"]
+                entry["service"]["requestPath"] = service_metadata["requestPath"]
+                if entry["service"]["threshold"] is None:
+                    entry["service"]["threshold"] = service_metadata["threshold"]
 
         return history
 

@@ -27,6 +27,13 @@ const ui = {
     serviceName: document.getElementById("serviceName"),
     serviceHost: document.getElementById("serviceHost"),
     serviceThreshold: document.getElementById("serviceThreshold"),
+    serviceCheckType: document.getElementById("serviceCheckType"),
+    servicePort: document.getElementById("servicePort"),
+    serviceRequestPath: document.getElementById("serviceRequestPath"),
+    portFields: document.getElementById("portFields"),
+    servicePortLabel: document.getElementById("servicePortLabel"),
+    servicePortHint: document.getElementById("servicePortHint"),
+    httpFields: document.getElementById("httpFields"),
     serviceImageFile: document.getElementById("serviceImageFile"),
     serviceImageHint: document.getElementById("serviceImageHint"),
     closeFormButton: document.getElementById("close-form-button"),
@@ -48,15 +55,15 @@ function formatLatency(value) {
 }
 
 function formatCompactLatency(value) {
-    return typeof value === "number" ? `${Math.round(value)} ms` : "—";
+    return typeof value === "number" ? `${Math.round(value)} ms` : "--";
 }
 
 function formatPercent(value) {
-    return typeof value === "number" ? `${value.toFixed(1)}%` : "—";
+    return typeof value === "number" ? `${value.toFixed(1)}%` : "--";
 }
 
 function formatDateTime(value) {
-    if (!value) return "Sem medições ainda";
+    if (!value) return "Sem medicoes ainda";
     return new Date(value).toLocaleString("pt-BR");
 }
 
@@ -70,24 +77,56 @@ function getStatusMeta(status) {
     return { label: "Online", chipClass: "status-online", accentClass: "accent-online" };
 }
 
+function getCheckTypeLabel(checkType) {
+    if (checkType === "tcp") return "TCP";
+    if (checkType === "http") return "HTTP";
+    if (checkType === "https") return "HTTPS";
+    return "Ping";
+}
+
+function buildTargetDisplay(service) {
+    const host = service.host || "-";
+    const port = service.port;
+    const requestPath = service.requestPath || "/";
+
+    if (service.checkType === "tcp") {
+        return `${host}:${port || 443}`;
+    }
+    if (service.checkType === "http" || service.checkType === "https") {
+        const portSuffix = port ? `:${port}` : "";
+        return `${service.checkType}://${host}${portSuffix}${requestPath}`;
+    }
+    return host;
+}
+
+function getCompactDetailMetric(service) {
+    if (service.checkType === "tcp") {
+        return { label: "Porta", value: String(service.port || 443) };
+    }
+    if (service.checkType === "http" || service.checkType === "https") {
+        return { label: "Rota", value: service.requestPath || "/" };
+    }
+    return { label: "Perda", value: formatPercent(service.packetLossPct) };
+}
+
 async function requestJson(url, options) {
     const response = await fetch(url, options);
     if (!response.ok) {
-        const payload = await response.json().catch(() => ({ error: "Erro de requisição." }));
+        const payload = await response.json().catch(() => ({ error: "Erro de requisicao." }));
         throw new Error(payload.error || `Falha em ${url}`);
     }
     return response.json();
 }
 
 function updateTimerLabel() {
-    ui.nextUpdateTimer.textContent = `Próxima atualização em ${state.countdown}s`;
+    ui.nextUpdateTimer.textContent = `Proxima atualizacao em ${state.countdown}s`;
 }
 
 function renderHeroMeta() {
     const { meta, summary } = state.dashboard;
-    ui.lastGlobalUpdate.textContent = `Última atualização: ${formatDateTime(meta.lastUpdate)}`;
+    ui.lastGlobalUpdate.textContent = `Ultima atualizacao: ${formatDateTime(meta.lastUpdate)}`;
     ui.servicesCaption.textContent =
-        `${summary.total} serviços monitorados • ${summary.offline} offline • ${summary.degraded} degradados`;
+        `${summary.total} servicos monitorados | ${summary.offline} offline | ${summary.degraded} degradados`;
     updateTimerLabel();
 }
 
@@ -95,23 +134,23 @@ function renderOverview() {
     const { summary } = state.dashboard;
     const cards = [
         {
-            title: "Serviços monitorados",
+            title: "Servicos monitorados",
             value: summary.total,
             tone: "tone-neutral",
         },
         {
-            title: "Saudáveis",
+            title: "Saudaveis",
             value: `${summary.online}/${summary.total}`,
             tone: "tone-good",
         },
         {
-            title: "Latência média",
-            value: summary.avgLatencyMs != null ? `${summary.avgLatencyMs.toFixed(1)} ms` : "—",
+            title: "Latencia media",
+            value: summary.avgLatencyMs != null ? `${summary.avgLatencyMs.toFixed(1)} ms` : "--",
             tone: "tone-latency",
         },
         {
-            title: "Estabilidade média",
-            value: summary.avgStabilityPct != null ? `${summary.avgStabilityPct.toFixed(1)}%` : "—",
+            title: "Estabilidade media",
+            value: summary.avgStabilityPct != null ? `${summary.avgStabilityPct.toFixed(1)}%` : "--",
             tone: "tone-stability",
         },
     ];
@@ -138,6 +177,7 @@ function renderServiceCard(service) {
         .slice(0, 2)
         .toUpperCase();
     const hasImage = Boolean(service.imageUrl);
+    const detailMetric = getCompactDetailMetric(service);
 
     return `
         <article class="service-card panel ${statusMeta.accentClass}" data-action="open-details" data-service-id="${service.id}">
@@ -145,11 +185,12 @@ function renderServiceCard(service) {
                 <div class="service-title-block">
                     <h3>${escapeHtml(service.name)}</h3>
                     <span class="status-chip ${statusMeta.chipClass}">${statusMeta.label}</span>
+                    <p>${escapeHtml(buildTargetDisplay(service))}</p>
                 </div>
 
                 <div class="service-actions">
-                    <button class="icon-button subtle" type="button" data-action="edit-service" data-service-id="${service.id}">✎</button>
-                    <button class="icon-button subtle danger" type="button" data-action="remove-service" data-service-id="${service.id}">×</button>
+                    <button class="icon-button subtle" type="button" data-action="edit-service" data-service-id="${service.id}">E</button>
+                    <button class="icon-button subtle danger" type="button" data-action="remove-service" data-service-id="${service.id}">X</button>
                 </div>
             </div>
 
@@ -166,20 +207,20 @@ function renderServiceCard(service) {
 
             <div class="metrics-grid metrics-grid-compact">
                 <div class="metric-box">
-                    <span>Latência</span>
+                    <span>Latencia</span>
                     <strong>${formatCompactLatency(service.avgLatencyMs)}</strong>
                 </div>
                 <div class="metric-box">
-                    <span>Jitter</span>
-                    <strong>${formatCompactLatency(service.jitterMs)}</strong>
+                    <span>Tipo</span>
+                    <strong>${getCheckTypeLabel(service.checkType)}</strong>
                 </div>
                 <div class="metric-box">
                     <span>Limiar</span>
                     <strong>${formatCompactLatency(service.threshold)}</strong>
                 </div>
                 <div class="metric-box">
-                    <span>Perda</span>
-                    <strong>${formatPercent(service.packetLossPct)}</strong>
+                    <span>${escapeHtml(detailMetric.label)}</span>
+                    <strong>${escapeHtml(detailMetric.value)}</strong>
                 </div>
             </div>
         </article>
@@ -235,8 +276,8 @@ function renderServices() {
     if (!services.length) {
         ui.servicesGrid.innerHTML = `
             <article class="empty-state panel">
-                <h3>Nenhum serviço cadastrado</h3>
-                <p>Adicione um host para começar a acompanhar latência, perda e estabilidade.</p>
+                <h3>Nenhum servico cadastrado</h3>
+                <p>Adicione um host para comecar a acompanhar latencia, disponibilidade e estabilidade.</p>
             </article>
         `;
         return;
@@ -271,7 +312,7 @@ function renderLargeChart(service, points) {
             ),
             datasets: [
                 {
-                    label: "Latência média",
+                    label: "Latencia media",
                     data: points.map((point) => point.latencyMs),
                     borderColor: "#2563eb",
                     backgroundColor: "rgba(37, 99, 235, 0.12)",
@@ -320,6 +361,29 @@ function renderLargeChart(service, points) {
     });
 }
 
+function renderDetailsMetrics(service) {
+    const detailMetric = getCompactDetailMetric(service);
+
+    ui.detailsMetrics.innerHTML = `
+        <article class="detail-metric panel">
+            <span>Latencia media</span>
+            <strong>${formatLatency(service.avgLatencyMs)}</strong>
+        </article>
+        <article class="detail-metric panel">
+            <span>Estabilidade</span>
+            <strong>${formatPercent(service.stabilityPct)}</strong>
+        </article>
+        <article class="detail-metric panel">
+            <span>Verificacao</span>
+            <strong>${escapeHtml(getCheckTypeLabel(service.checkType))}</strong>
+        </article>
+        <article class="detail-metric panel">
+            <span>${escapeHtml(detailMetric.label)}</span>
+            <strong>${escapeHtml(detailMetric.value)}</strong>
+        </article>
+    `;
+}
+
 function openDetails(serviceId) {
     const service = state.dashboard.services.find((item) => item.id === serviceId);
     if (!service) return;
@@ -328,27 +392,10 @@ function openDetails(serviceId) {
     const statusMeta = getStatusMeta(service.status);
 
     ui.detailsName.textContent = service.name;
-    ui.detailsHost.textContent = service.host;
-    ui.detailsStatusLabel.textContent = `${statusMeta.label} • última leitura ${formatDateTime(service.lastUpdate)}`;
+    ui.detailsHost.textContent = buildTargetDisplay(service);
+    ui.detailsStatusLabel.textContent = `${statusMeta.label} | ultima leitura ${formatDateTime(service.lastUpdate)}`;
     ui.detailsThresholdLabel.textContent = `Limiar: ${formatCompactLatency(service.threshold)}`;
-    ui.detailsMetrics.innerHTML = `
-        <article class="detail-metric panel">
-            <span>Latência média</span>
-            <strong>${formatLatency(service.avgLatencyMs)}</strong>
-        </article>
-        <article class="detail-metric panel">
-            <span>Jitter</span>
-            <strong>${formatLatency(service.jitterMs)}</strong>
-        </article>
-        <article class="detail-metric panel">
-            <span>Perda de pacotes</span>
-            <strong>${formatPercent(service.packetLossPct)}</strong>
-        </article>
-        <article class="detail-metric panel">
-            <span>Estabilidade</span>
-            <strong>${formatPercent(service.stabilityPct)}</strong>
-        </article>
-    `;
+    renderDetailsMetrics(service);
 
     renderLargeChart(service, history);
     ui.detailsModal.style.display = "flex";
@@ -363,12 +410,12 @@ function updateImageHint() {
     const hasStoredImage = Boolean(state.currentFormImageUrl);
 
     if (hasSelectedFile) {
-        ui.serviceImageHint.textContent = "Nova imagem selecionada para este serviço.";
+        ui.serviceImageHint.textContent = "Nova imagem selecionada para este servico.";
         return;
     }
 
     if (hasStoredImage) {
-        ui.serviceImageHint.textContent = "Nenhum novo arquivo selecionado. A imagem atual será mantida.";
+        ui.serviceImageHint.textContent = "Nenhum novo arquivo selecionado. A imagem atual sera mantida.";
         return;
     }
 
@@ -384,14 +431,46 @@ function readImageFileAsDataUrl(file) {
     });
 }
 
+function syncMonitorFields() {
+    const checkType = ui.serviceCheckType.value;
+    const usesPort = checkType !== "ping";
+    const isTcp = checkType === "tcp";
+    const isHttp = checkType === "http" || checkType === "https";
+
+    ui.portFields.classList.toggle("is-hidden", !usesPort);
+    ui.httpFields.classList.toggle("is-hidden", !isHttp);
+    ui.servicePort.disabled = !usesPort;
+    ui.serviceRequestPath.disabled = !isHttp;
+
+    if (checkType === "ping") {
+        ui.serviceHost.placeholder = "Ex: 192.168.0.1 ou servidor.local";
+    } else if (checkType === "tcp") {
+        ui.serviceHost.placeholder = "Ex: geridinss.dataprev.gov.br";
+        ui.servicePortLabel.textContent = "Porta TCP";
+        ui.servicePortHint.textContent = "Se ficar vazio, o monitor usa a porta 443.";
+    } else if (checkType === "http") {
+        ui.serviceHost.placeholder = "Ex: portal.exemplo.gov.br";
+        ui.servicePortLabel.textContent = "Porta HTTP";
+        ui.servicePortHint.textContent = "Opcional. Se ficar vazio, o monitor usa a porta 80.";
+    } else {
+        ui.serviceHost.placeholder = "Ex: portal.exemplo.gov.br";
+        ui.servicePortLabel.textContent = "Porta HTTPS";
+        ui.servicePortHint.textContent = "Opcional. Se ficar vazio, o monitor usa a porta 443.";
+    }
+}
+
 function openCreateModal() {
-    ui.modalTitle.textContent = "Adicionar serviço";
+    ui.modalTitle.textContent = "Adicionar servico";
     ui.editServiceId.value = "";
     ui.serviceName.value = "";
     ui.serviceHost.value = "";
     ui.serviceThreshold.value = "100";
+    ui.serviceCheckType.value = "ping";
+    ui.servicePort.value = "";
+    ui.serviceRequestPath.value = "/";
     ui.serviceImageFile.value = "";
     state.currentFormImageUrl = "";
+    syncMonitorFields();
     updateImageHint();
     ui.addModal.style.display = "flex";
 }
@@ -400,13 +479,17 @@ function openEditModal(serviceId) {
     const service = state.dashboard.services.find((item) => item.id === serviceId);
     if (!service) return;
 
-    ui.modalTitle.textContent = "Editar serviço";
+    ui.modalTitle.textContent = "Editar servico";
     ui.editServiceId.value = serviceId;
     ui.serviceName.value = service.name;
     ui.serviceHost.value = service.host;
     ui.serviceThreshold.value = service.threshold ?? 100;
+    ui.serviceCheckType.value = service.checkType ?? "ping";
+    ui.servicePort.value = service.port ?? "";
+    ui.serviceRequestPath.value = service.requestPath ?? "/";
     ui.serviceImageFile.value = "";
     state.currentFormImageUrl = service.imageUrl ?? "";
+    syncMonitorFields();
     updateImageHint();
     ui.addModal.style.display = "flex";
 }
@@ -428,10 +511,13 @@ async function saveService() {
         host: ui.serviceHost.value.trim(),
         threshold: Number(ui.serviceThreshold.value),
         imageUrl,
+        checkType: ui.serviceCheckType.value,
+        port: ui.servicePort.value.trim() ? Number(ui.servicePort.value) : null,
+        requestPath: ui.serviceRequestPath.value.trim() || "/",
     };
 
     if (!payload.name || !payload.host) {
-        alert("Preencha nome e host do serviço.");
+        alert("Preencha nome e host do servico.");
         return;
     }
 
@@ -447,7 +533,7 @@ async function saveService() {
 }
 
 async function removeService(serviceId) {
-    if (!confirm("Deseja remover este serviço do monitoramento?")) {
+    if (!confirm("Deseja remover este servico do monitoramento?")) {
         return;
     }
 
@@ -482,6 +568,7 @@ function bindEvents() {
     ui.closeFormButton.addEventListener("click", closeFormModal);
     ui.cancelFormButton.addEventListener("click", closeFormModal);
     ui.saveServiceButton.addEventListener("click", saveService);
+    ui.serviceCheckType.addEventListener("change", syncMonitorFields);
     ui.serviceImageFile.addEventListener("change", updateImageHint);
     ui.servicesGrid.addEventListener("click", handleServiceGridClick);
 
@@ -523,6 +610,7 @@ function startRefreshLoop() {
 
 async function bootstrap() {
     bindEvents();
+    syncMonitorFields();
     startRefreshLoop();
 
     try {
@@ -532,7 +620,7 @@ async function bootstrap() {
         ui.servicesGrid.innerHTML = `
             <article class="empty-state panel">
                 <h3>Falha ao carregar o painel</h3>
-                <p>Verifique se o servidor Python está ativo e tente novamente.</p>
+                <p>Verifique se o servidor Python esta ativo e tente novamente.</p>
             </article>
         `;
     }

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import http.client
 import math
 import re
+import socket
+import ssl
 import statistics
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,6 +29,21 @@ def calculate_jitter(latencies: list[float]) -> float | None:
 
     deltas = [abs(current - previous) for previous, current in zip(latencies, latencies[1:])]
     return round(sum(deltas) / len(deltas), 2)
+
+
+def _single_probe_result(online: bool, latency_ms: float | None) -> dict[str, Any]:
+    rounded_latency = round(latency_ms, 2) if latency_ms is not None else None
+    return {
+        "online": online,
+        "sent": 1,
+        "received": 1 if online else 0,
+        "packet_loss_pct": 0.0 if online else 100.0,
+        "avg_latency_ms": rounded_latency,
+        "min_latency_ms": rounded_latency,
+        "max_latency_ms": rounded_latency,
+        "jitter_ms": None,
+        "samples_ms": [rounded_latency] if rounded_latency is not None else [],
+    }
 
 
 def ping_host(host: str, count: int, timeout_ms: int) -> dict[str, Any]:
@@ -85,6 +104,65 @@ def ping_host(host: str, count: int, timeout_ms: int) -> dict[str, Any]:
         "jitter_ms": jitter,
         "samples_ms": latencies,
     }
+
+
+def tcp_probe(host: str, port: int, timeout_ms: int) -> dict[str, Any]:
+    timeout_seconds = max(timeout_ms / 1000, 0.1)
+    start = time.perf_counter()
+    try:
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            latency_ms = (time.perf_counter() - start) * 1000
+            return _single_probe_result(True, latency_ms)
+    except OSError:
+        return _single_probe_result(False, None)
+
+
+def http_probe(
+    host: str,
+    scheme: str,
+    timeout_ms: int,
+    path: str = "/",
+    port: int | None = None,
+) -> dict[str, Any]:
+    timeout_seconds = max(timeout_ms / 1000, 0.1)
+    connection_cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+    context = ssl._create_unverified_context() if scheme == "https" else None
+    kwargs: dict[str, Any] = {"timeout": timeout_seconds}
+    if context is not None:
+        kwargs["context"] = context
+
+    connection = connection_cls(host, port=port, **kwargs)
+    start = time.perf_counter()
+
+    try:
+        connection.request("GET", path or "/", headers={"User-Agent": "PulseBoard/1.0"})
+        response = connection.getresponse()
+        response.read(1)
+        latency_ms = (time.perf_counter() - start) * 1000
+        return _single_probe_result(True, latency_ms)
+    except http.client.HTTPException:
+        return _single_probe_result(False, None)
+    except OSError:
+        return _single_probe_result(False, None)
+    finally:
+        connection.close()
+
+
+def measure_service(service: dict[str, Any], ping_count: int, timeout_ms: int) -> dict[str, Any]:
+    check_type = str(service.get("checkType") or "ping").lower()
+    host = str(service["host"])
+
+    if check_type == "tcp":
+        return tcp_probe(host, int(service.get("port") or 443), timeout_ms)
+    if check_type in {"http", "https"}:
+        return http_probe(
+            host=host,
+            scheme=check_type,
+            timeout_ms=timeout_ms,
+            path=str(service.get("requestPath") or "/"),
+            port=service.get("port"),
+        )
+    return ping_host(host, ping_count, timeout_ms)
 
 
 def resolve_status(online: bool, avg_latency_ms: float | None, threshold: int | None) -> str:
@@ -170,7 +248,7 @@ class MonitorService:
                 if not all(key in service for key in ("id", "name", "host")):
                     continue
 
-                result = ping_host(service["host"], self.ping_count, self.timeout_ms)
+                result = measure_service(service, self.ping_count, self.timeout_ms)
                 entry = self._build_entry(service, result)
                 persisted_entry = self.storage.append_history_entry(
                     entry,
@@ -182,7 +260,7 @@ class MonitorService:
 
                 self.current_status[service_id] = persisted_entry
 
-    def _build_entry(self, service: dict[str, Any], ping_result: dict[str, Any]) -> dict[str, Any]:
+    def _build_entry(self, service: dict[str, Any], probe_result: dict[str, Any]) -> dict[str, Any]:
         timestamp = datetime.now(timezone.utc).isoformat()
         threshold = service.get("threshold")
 
@@ -193,16 +271,19 @@ class MonitorService:
                 "name": service["name"],
                 "host": service["host"],
                 "threshold": threshold,
+                "checkType": service.get("checkType", "ping"),
+                "port": service.get("port"),
+                "requestPath": service.get("requestPath", "/"),
             },
-            "online": ping_result["online"],
-            "status": resolve_status(ping_result["online"], ping_result["avg_latency_ms"], threshold),
-            "sent": ping_result["sent"],
-            "received": ping_result["received"],
-            "packet_loss_pct": ping_result["packet_loss_pct"],
-            "avg_latency_ms": ping_result["avg_latency_ms"],
-            "min_latency_ms": ping_result["min_latency_ms"],
-            "max_latency_ms": ping_result["max_latency_ms"],
-            "jitter_ms": ping_result["jitter_ms"],
-            "samples_ms": ping_result["samples_ms"],
+            "online": probe_result["online"],
+            "status": resolve_status(probe_result["online"], probe_result["avg_latency_ms"], threshold),
+            "sent": probe_result["sent"],
+            "received": probe_result["received"],
+            "packet_loss_pct": probe_result["packet_loss_pct"],
+            "avg_latency_ms": probe_result["avg_latency_ms"],
+            "min_latency_ms": probe_result["min_latency_ms"],
+            "max_latency_ms": probe_result["max_latency_ms"],
+            "jitter_ms": probe_result["jitter_ms"],
+            "samples_ms": probe_result["samples_ms"],
             "stability_pct": 0.0,
         }
