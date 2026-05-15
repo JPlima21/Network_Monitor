@@ -9,14 +9,6 @@ def average(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 2)
 
 
-def get_status_priority(status: str) -> int:
-    if status == "offline":
-        return 0
-    if status == "degraded":
-        return 1
-    return 2
-
-
 def build_dashboard_data(
     services: list[dict[str, Any]],
     history: dict[str, list[dict[str, Any]]],
@@ -35,6 +27,7 @@ def build_dashboard_data(
                     "host": service["host"],
                     "threshold": service.get("threshold", 100),
                     "imageUrl": service.get("imageUrl", ""),
+                    "sortOrder": service.get("sortOrder", 0),
                     "online": False,
                     "status": "offline",
                     "avgLatencyMs": None,
@@ -58,6 +51,7 @@ def build_dashboard_data(
                 "host": service["host"],
                 "threshold": service.get("threshold", 100),
                 "imageUrl": service.get("imageUrl", ""),
+                "sortOrder": service.get("sortOrder", 0),
                 "online": latest["online"],
                 "status": latest["status"],
                 "avgLatencyMs": latest["avg_latency_ms"],
@@ -72,10 +66,6 @@ def build_dashboard_data(
                 "lastUpdate": latest["timestamp"],
             }
         )
-
-    snapshots.sort(
-        key=lambda service: (get_status_priority(service["status"]), service["name"].lower())
-    )
 
     normalized_history = {
         service["id"]: [

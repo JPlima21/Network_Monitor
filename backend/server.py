@@ -76,6 +76,25 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/services/reorder":
+            payload = self._read_json_body()
+            service_ids = payload.get("serviceIds")
+            if not isinstance(service_ids, list) or not all(isinstance(item, str) for item in service_ids):
+                self._send_json(
+                    {"error": "serviceIds must be a list of strings"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            try:
+                services = storage.reorder_services(service_ids)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            self._send_json({"message": "Service order updated", "services": services})
+            return
+
         if not parsed.path.startswith("/api/services/"):
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
             return

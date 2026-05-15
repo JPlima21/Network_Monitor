@@ -4,6 +4,10 @@ const state = {
     largeChart: null,
     countdown: 30,
     currentFormImageUrl: "",
+    draggedServiceId: null,
+    dragStartOrder: [],
+    suppressNextCardClick: false,
+    savingOrder: false,
 };
 
 const ui = {
@@ -48,15 +52,15 @@ function formatLatency(value) {
 }
 
 function formatCompactLatency(value) {
-    return typeof value === "number" ? `${Math.round(value)} ms` : "—";
+    return typeof value === "number" ? `${Math.round(value)} ms` : "--";
 }
 
 function formatPercent(value) {
-    return typeof value === "number" ? `${value.toFixed(1)}%` : "—";
+    return typeof value === "number" ? `${value.toFixed(1)}%` : "--";
 }
 
 function formatDateTime(value) {
-    if (!value) return "Sem medições ainda";
+    if (!value) return "Sem medicoes ainda";
     return new Date(value).toLocaleString("pt-BR");
 }
 
@@ -73,21 +77,21 @@ function getStatusMeta(status) {
 async function requestJson(url, options) {
     const response = await fetch(url, options);
     if (!response.ok) {
-        const payload = await response.json().catch(() => ({ error: "Erro de requisição." }));
+        const payload = await response.json().catch(() => ({ error: "Erro de requisicao." }));
         throw new Error(payload.error || `Falha em ${url}`);
     }
     return response.json();
 }
 
 function updateTimerLabel() {
-    ui.nextUpdateTimer.textContent = `Próxima atualização em ${state.countdown}s`;
+    ui.nextUpdateTimer.textContent = `Proxima atualizacao em ${state.countdown}s`;
 }
 
 function renderHeroMeta() {
     const { meta, summary } = state.dashboard;
-    ui.lastGlobalUpdate.textContent = `Última atualização: ${formatDateTime(meta.lastUpdate)}`;
+    ui.lastGlobalUpdate.textContent = `Ultima atualizacao: ${formatDateTime(meta.lastUpdate)}`;
     ui.servicesCaption.textContent =
-        `${summary.total} serviços monitorados • ${summary.offline} offline • ${summary.degraded} degradados`;
+        `${summary.total} servicos monitorados | ${summary.offline} offline | ${summary.degraded} degradados`;
     updateTimerLabel();
 }
 
@@ -95,23 +99,23 @@ function renderOverview() {
     const { summary } = state.dashboard;
     const cards = [
         {
-            title: "Serviços monitorados",
+            title: "Servicos monitorados",
             value: summary.total,
             tone: "tone-neutral",
         },
         {
-            title: "Saudáveis",
+            title: "Saudaveis",
             value: `${summary.online}/${summary.total}`,
             tone: "tone-good",
         },
         {
-            title: "Latência média",
-            value: summary.avgLatencyMs != null ? `${summary.avgLatencyMs.toFixed(1)} ms` : "—",
+            title: "Latencia media",
+            value: summary.avgLatencyMs != null ? `${summary.avgLatencyMs.toFixed(1)} ms` : "--",
             tone: "tone-latency",
         },
         {
-            title: "Estabilidade média",
-            value: summary.avgStabilityPct != null ? `${summary.avgStabilityPct.toFixed(1)}%` : "—",
+            title: "Estabilidade media",
+            value: summary.avgStabilityPct != null ? `${summary.avgStabilityPct.toFixed(1)}%` : "--",
             tone: "tone-stability",
         },
     ];
@@ -129,6 +133,12 @@ function destroyMiniCharts() {
     state.charts = {};
 }
 
+function getCurrentGridOrder() {
+    return Array.from(ui.servicesGrid.querySelectorAll(".service-card"))
+        .map((card) => card.dataset.serviceId)
+        .filter(Boolean);
+}
+
 function renderServiceCard(service) {
     const statusMeta = getStatusMeta(service.status);
     const initials = service.name
@@ -140,7 +150,12 @@ function renderServiceCard(service) {
     const hasImage = Boolean(service.imageUrl);
 
     return `
-        <article class="service-card panel ${statusMeta.accentClass}" data-action="open-details" data-service-id="${service.id}">
+        <article
+            class="service-card panel ${statusMeta.accentClass}"
+            data-action="open-details"
+            data-service-id="${service.id}"
+            draggable="true"
+        >
             <div class="service-card-header">
                 <div class="service-title-block">
                     <h3>${escapeHtml(service.name)}</h3>
@@ -148,8 +163,8 @@ function renderServiceCard(service) {
                 </div>
 
                 <div class="service-actions">
-                    <button class="icon-button subtle" type="button" data-action="edit-service" data-service-id="${service.id}">✎</button>
-                    <button class="icon-button subtle danger" type="button" data-action="remove-service" data-service-id="${service.id}">×</button>
+                    <button class="icon-button subtle" type="button" data-action="edit-service" data-service-id="${service.id}">E</button>
+                    <button class="icon-button subtle danger" type="button" data-action="remove-service" data-service-id="${service.id}">X</button>
                 </div>
             </div>
 
@@ -166,7 +181,7 @@ function renderServiceCard(service) {
 
             <div class="metrics-grid metrics-grid-compact">
                 <div class="metric-box">
-                    <span>Latência</span>
+                    <span>Latencia</span>
                     <strong>${formatCompactLatency(service.avgLatencyMs)}</strong>
                 </div>
                 <div class="metric-box">
@@ -235,8 +250,8 @@ function renderServices() {
     if (!services.length) {
         ui.servicesGrid.innerHTML = `
             <article class="empty-state panel">
-                <h3>Nenhum serviço cadastrado</h3>
-                <p>Adicione um host para começar a acompanhar latência, perda e estabilidade.</p>
+                <h3>Nenhum servico cadastrado</h3>
+                <p>Adicione um host para comecar a acompanhar latencia, perda e estabilidade.</p>
             </article>
         `;
         return;
@@ -245,6 +260,26 @@ function renderServices() {
     ui.servicesGrid.innerHTML = services.map(renderServiceCard).join("");
     bindAvatarFallbacks();
     services.forEach((service) => createMiniChart(service, history[service.id] || []));
+}
+
+async function persistServiceOrder() {
+    const serviceIds = getCurrentGridOrder();
+    state.savingOrder = true;
+
+    try {
+        await requestJson("/api/services/reorder", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ serviceIds }),
+        });
+        await fetchDashboard();
+    } catch (error) {
+        console.error(error);
+        alert("Nao foi possivel salvar a nova ordem dos cards.");
+        await fetchDashboard();
+    } finally {
+        state.savingOrder = false;
+    }
 }
 
 function bindAvatarFallbacks() {
@@ -271,7 +306,7 @@ function renderLargeChart(service, points) {
             ),
             datasets: [
                 {
-                    label: "Latência média",
+                    label: "Latencia media",
                     data: points.map((point) => point.latencyMs),
                     borderColor: "#2563eb",
                     backgroundColor: "rgba(37, 99, 235, 0.12)",
@@ -329,11 +364,11 @@ function openDetails(serviceId) {
 
     ui.detailsName.textContent = service.name;
     ui.detailsHost.textContent = service.host;
-    ui.detailsStatusLabel.textContent = `${statusMeta.label} • última leitura ${formatDateTime(service.lastUpdate)}`;
+    ui.detailsStatusLabel.textContent = `${statusMeta.label} | ultima leitura ${formatDateTime(service.lastUpdate)}`;
     ui.detailsThresholdLabel.textContent = `Limiar: ${formatCompactLatency(service.threshold)}`;
     ui.detailsMetrics.innerHTML = `
         <article class="detail-metric panel">
-            <span>Latência média</span>
+            <span>Latencia media</span>
             <strong>${formatLatency(service.avgLatencyMs)}</strong>
         </article>
         <article class="detail-metric panel">
@@ -363,12 +398,12 @@ function updateImageHint() {
     const hasStoredImage = Boolean(state.currentFormImageUrl);
 
     if (hasSelectedFile) {
-        ui.serviceImageHint.textContent = "Nova imagem selecionada para este serviço.";
+        ui.serviceImageHint.textContent = "Nova imagem selecionada para este servico.";
         return;
     }
 
     if (hasStoredImage) {
-        ui.serviceImageHint.textContent = "Nenhum novo arquivo selecionado. A imagem atual será mantida.";
+        ui.serviceImageHint.textContent = "Nenhum novo arquivo selecionado. A imagem atual sera mantida.";
         return;
     }
 
@@ -385,7 +420,7 @@ function readImageFileAsDataUrl(file) {
 }
 
 function openCreateModal() {
-    ui.modalTitle.textContent = "Adicionar serviço";
+    ui.modalTitle.textContent = "Adicionar servico";
     ui.editServiceId.value = "";
     ui.serviceName.value = "";
     ui.serviceHost.value = "";
@@ -400,7 +435,7 @@ function openEditModal(serviceId) {
     const service = state.dashboard.services.find((item) => item.id === serviceId);
     if (!service) return;
 
-    ui.modalTitle.textContent = "Editar serviço";
+    ui.modalTitle.textContent = "Editar servico";
     ui.editServiceId.value = serviceId;
     ui.serviceName.value = service.name;
     ui.serviceHost.value = service.host;
@@ -431,7 +466,7 @@ async function saveService() {
     };
 
     if (!payload.name || !payload.host) {
-        alert("Preencha nome e host do serviço.");
+        alert("Preencha nome e host do servico.");
         return;
     }
 
@@ -447,7 +482,7 @@ async function saveService() {
 }
 
 async function removeService(serviceId) {
-    if (!confirm("Deseja remover este serviço do monitoramento?")) {
+    if (!confirm("Deseja remover este servico do monitoramento?")) {
         return;
     }
 
@@ -455,7 +490,85 @@ async function removeService(serviceId) {
     await fetchDashboard();
 }
 
+function handleGridDragStart(event) {
+    const card = event.target.closest(".service-card");
+    if (!card || event.target.closest("button")) {
+        event.preventDefault();
+        return;
+    }
+
+    state.draggedServiceId = card.dataset.serviceId;
+    state.dragStartOrder = getCurrentGridOrder();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", state.draggedServiceId);
+    card.classList.add("is-dragging");
+    ui.servicesGrid.classList.add("is-sorting");
+}
+
+function handleGridDragOver(event) {
+    if (!state.draggedServiceId) {
+        return;
+    }
+
+    event.preventDefault();
+
+    const draggingCard = ui.servicesGrid.querySelector(".service-card.is-dragging");
+    const targetCard = event.target.closest(".service-card");
+    if (!draggingCard || !targetCard || draggingCard === targetCard) {
+        return;
+    }
+
+    const targetRect = targetCard.getBoundingClientRect();
+    const draggingRect = draggingCard.getBoundingClientRect();
+    const sameRow = Math.abs(targetRect.top - draggingRect.top) < targetRect.height / 2;
+    const insertAfter = sameRow
+        ? event.clientX > targetRect.left + targetRect.width / 2
+        : event.clientY > targetRect.top + targetRect.height / 2;
+
+    if (insertAfter) {
+        targetCard.insertAdjacentElement("afterend", draggingCard);
+    } else {
+        targetCard.insertAdjacentElement("beforebegin", draggingCard);
+    }
+}
+
+function handleGridDrop(event) {
+    if (state.draggedServiceId) {
+        event.preventDefault();
+    }
+}
+
+async function handleGridDragEnd(event) {
+    const card = event.target.closest(".service-card");
+    if (card) {
+        card.classList.remove("is-dragging");
+    }
+
+    ui.servicesGrid.classList.remove("is-sorting");
+
+    if (!state.draggedServiceId) {
+        return;
+    }
+
+    const nextOrder = getCurrentGridOrder();
+    const changed = nextOrder.join("|") !== state.dragStartOrder.join("|");
+    state.draggedServiceId = null;
+    state.dragStartOrder = [];
+
+    if (!changed || state.savingOrder) {
+        return;
+    }
+
+    state.suppressNextCardClick = true;
+    await persistServiceOrder();
+}
+
 function handleServiceGridClick(event) {
+    if (state.suppressNextCardClick) {
+        state.suppressNextCardClick = false;
+        return;
+    }
+
     const editButton = event.target.closest('[data-action="edit-service"]');
     if (editButton) {
         event.stopPropagation();
@@ -484,6 +597,10 @@ function bindEvents() {
     ui.saveServiceButton.addEventListener("click", saveService);
     ui.serviceImageFile.addEventListener("change", updateImageHint);
     ui.servicesGrid.addEventListener("click", handleServiceGridClick);
+    ui.servicesGrid.addEventListener("dragstart", handleGridDragStart);
+    ui.servicesGrid.addEventListener("dragover", handleGridDragOver);
+    ui.servicesGrid.addEventListener("drop", handleGridDrop);
+    ui.servicesGrid.addEventListener("dragend", handleGridDragEnd);
 
     ui.detailsModal.addEventListener("click", (event) => {
         if (event.target === ui.detailsModal) {
@@ -532,7 +649,7 @@ async function bootstrap() {
         ui.servicesGrid.innerHTML = `
             <article class="empty-state panel">
                 <h3>Falha ao carregar o painel</h3>
-                <p>Verifique se o servidor Python está ativo e tente novamente.</p>
+                <p>Verifique se o servidor Python esta ativo e tente novamente.</p>
             </article>
         `;
     }

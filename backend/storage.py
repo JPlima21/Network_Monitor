@@ -87,7 +87,8 @@ class SqliteStorage:
                 name TEXT NOT NULL,
                 host TEXT NOT NULL,
                 threshold INTEGER NOT NULL,
-                image_url TEXT NOT NULL DEFAULT ''
+                image_url TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0
             )
             """,
             commit=True,
@@ -128,6 +129,22 @@ class SqliteStorage:
                 "ALTER TABLE services ADD COLUMN image_url TEXT NOT NULL DEFAULT ''",
                 commit=True,
             )
+        if "sort_order" not in columns:
+            self._execute(
+                "ALTER TABLE services ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+                commit=True,
+            )
+            self._backfill_service_order()
+
+    def _backfill_service_order(self) -> None:
+        rows = self._connection.execute(
+            "SELECT id FROM services ORDER BY name ASC, id ASC"
+        ).fetchall()
+        self._connection.executemany(
+            "UPDATE services SET sort_order = ? WHERE id = ?",
+            [(index, row["id"]) for index, row in enumerate(rows)],
+        )
+        self._connection.commit()
 
     def _ensure_history_columns(self) -> None:
         columns = {
@@ -170,7 +187,11 @@ class SqliteStorage:
 
     def load_services(self) -> list[dict[str, Any]]:
         cursor = self._execute(
-            "SELECT id, name, host, threshold, image_url FROM services ORDER BY name ASC"
+            """
+            SELECT id, name, host, threshold, image_url, sort_order
+            FROM services
+            ORDER BY sort_order ASC, name ASC
+            """
         )
         return [
             {
@@ -179,6 +200,7 @@ class SqliteStorage:
                 "host": row["host"],
                 "threshold": row["threshold"],
                 "imageUrl": row["image_url"] or "",
+                "sortOrder": row["sort_order"],
             }
             for row in cursor.fetchall()
         ]
@@ -187,13 +209,14 @@ class SqliteStorage:
         with self._lock:
             self._connection.executemany(
                 """
-                INSERT INTO services (id, name, host, threshold, image_url)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO services (id, name, host, threshold, image_url, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     host = excluded.host,
                     threshold = excluded.threshold,
-                    image_url = excluded.image_url
+                    image_url = excluded.image_url,
+                    sort_order = excluded.sort_order
                 """,
                 [
                     (
@@ -202,8 +225,9 @@ class SqliteStorage:
                         str(service["host"]),
                         int(service.get("threshold", 100)),
                         str(service.get("imageUrl", "") or ""),
+                        int(service.get("sortOrder", index)),
                     )
-                    for service in services
+                    for index, service in enumerate(services)
                 ],
             )
             self._connection.commit()
@@ -220,6 +244,10 @@ class SqliteStorage:
                 row["id"]
                 for row in self._connection.execute("SELECT id FROM services").fetchall()
             }
+            next_sort_order_row = self._connection.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM services"
+            ).fetchone()
+            next_sort_order = int(next_sort_order_row["next_sort_order"])
             base = _slugify_name(name)
             service_id = base
             index = 2
@@ -234,11 +262,12 @@ class SqliteStorage:
                 "host": host,
                 "threshold": threshold,
                 "imageUrl": image_url,
+                "sortOrder": next_sort_order,
             }
             self._connection.execute(
                 """
-                INSERT INTO services (id, name, host, threshold, image_url)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO services (id, name, host, threshold, image_url, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     service["id"],
@@ -246,6 +275,7 @@ class SqliteStorage:
                     service["host"],
                     service["threshold"],
                     service["imageUrl"],
+                    service["sortOrder"],
                 ),
             )
             self._connection.commit()
@@ -254,7 +284,7 @@ class SqliteStorage:
     def update_service(self, service_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         with self._lock:
             row = self._connection.execute(
-                "SELECT id, name, host, threshold, image_url FROM services WHERE id = ?",
+                "SELECT id, name, host, threshold, image_url, sort_order FROM services WHERE id = ?",
                 (service_id,),
             ).fetchone()
             if row is None:
@@ -266,6 +296,7 @@ class SqliteStorage:
                 "host": row["host"],
                 "threshold": row["threshold"],
                 "imageUrl": row["image_url"] or "",
+                "sortOrder": row["sort_order"],
             }
 
             if "name" in payload:
@@ -298,6 +329,25 @@ class SqliteStorage:
             )
             self._connection.commit()
             return updated
+
+    def reorder_services(self, service_ids: list[str]) -> list[dict[str, Any]]:
+        with self._lock:
+            existing_rows = self._connection.execute(
+                "SELECT id FROM services"
+            ).fetchall()
+            existing_ids = {row["id"] for row in existing_rows}
+
+            incoming_ids = [str(service_id) for service_id in service_ids]
+            if set(incoming_ids) != existing_ids or len(incoming_ids) != len(existing_ids):
+                raise ValueError("Service order payload must include every service exactly once")
+
+            self._connection.executemany(
+                "UPDATE services SET sort_order = ? WHERE id = ?",
+                [(index, service_id) for index, service_id in enumerate(incoming_ids)],
+            )
+            self._connection.commit()
+
+        return self.load_services()
 
     def load_history(self) -> dict[str, list[dict[str, Any]]]:
         cursor = self._execute(
