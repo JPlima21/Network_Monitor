@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PulseBoard | Monitor de Rede</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="page-shell">
+        <div class="ambient ambient-left"></div>
+        <div class="ambient ambient-right"></div>
+
+        <main class="app-frame">
+            <section class="hero panel">
+                <div class="hero-actions">
+                    <div class="live-card">
+                        <strong id="next-update-timer">Próxima atualização em 30s</strong>
+                        <span id="last-global-update">Carregando medições...</span>
+                    </div>
+                    <button id="add-service-button" class="primary-button" type="button">Adicionar serviço</button>
+                </div>
+            </section>
+
+            <section id="overview-grid" class="overview-grid"></section>
+
+            <section class="section-head">
+                <div>
+                    <span class="section-kicker">Serviços monitorados</span>
+                    <h2>Saúde operacional em tempo real</h2>
+                </div>
+                <p id="services-caption">Carregando serviços...</p>
+            </section>
+
+            <section id="services-grid" class="services-grid"></section>
+        </main>
+    </div>
+
+    <div id="detailsModal" class="modal">
+        <div class="modal-card details-modal">
+            <div class="details-header">
+                <div>
+                    <span class="section-kicker">Detalhes do serviço</span>
+                    <h3 id="detailsName">-</h3>
+                    <p id="detailsHost">-</p>
+                </div>
+                <button id="close-details-button" class="icon-button" type="button" aria-label="Fechar detalhes">×</button>
+            </div>
+
+            <div id="detailsMetrics" class="details-metrics"></div>
+
+            <div class="panel detail-chart-panel">
+                <div class="chart-panel-header">
+                    <div>
+                        <span class="chart-caption">Evolução da latência</span>
+                        <strong id="detailsStatusLabel">Histórico recente</strong>
+                    </div>
+                    <span id="detailsThresholdLabel" class="muted-badge">-</span>
+                </div>
+                <div class="large-chart-container">
+                    <canvas id="largeChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="addModal" class="modal">
+        <div class="modal-card form-modal">
+            <div class="form-header">
+                <div>
+                    <span class="section-kicker">Cadastro</span>
+                    <h3 id="modalTitle">Adicionar serviço</h3>
+                </div>
+                <button id="close-form-button" class="icon-button" type="button" aria-label="Fechar formulário">×</button>
+            </div>
+
+            <input type="hidden" id="editServiceId">
+
+            <div class="form-grid">
+                <label class="form-field">
+                    <span>Nome do serviço</span>
+                    <input type="text" id="serviceName" placeholder="Ex: Link principal">
+                </label>
+
+                <label class="form-field">
+                    <span>Host ou IP</span>
+                    <input type="text" id="serviceHost" placeholder="Ex: 192.168.0.1">
+                </label>
+
+                <label class="form-field">
+                    <span>Limiar de alerta (ms)</span>
+                    <input type="number" id="serviceThreshold" placeholder="Ex: 100" value="100">
+                </label>
+
+                <label class="form-field">
+                    <span>Imagem/logo do serviço</span>
+                    <input type="file" id="serviceImageFile" accept="image/*">
+                    <small id="serviceImageHint" class="form-hint">Selecione uma imagem local para substituir o avatar.</small>
+                </label>
+            </div>
+
+            <div class="modal-actions">
+                <button id="cancel-form-button" class="secondary-button" type="button">Cancelar</button>
+                <button id="save-service-button" class="primary-button" type="button">Salvar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
