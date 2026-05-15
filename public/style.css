@@ -1,4 +1,5 @@
 :root {
+    /* Tokens visuais centrais do tema do painel */
     --bg: #08111f;
     --bg-soft: #0f1b2d;
     --panel: rgba(9, 19, 35, 0.82);
@@ -23,6 +24,7 @@
 }
 
 body {
+    /* Fundo com gradientes para dar profundidade sem pesar a leitura */
     min-height: 100vh;
     font-family: "Manrope", sans-serif;
     color: var(--text);
@@ -39,6 +41,7 @@ input {
 
 /* Page Shell */
 .page-shell {
+    /* Contem o fundo e o frame principal da aplicacao */
     position: relative;
     overflow: hidden;
 }
@@ -67,6 +70,7 @@ input {
 
 /* Main Frame */
 .app-frame {
+    /* Limita a largura util do dashboard e centraliza o conteudo */
     position: relative;
     z-index: 1;
     width: min(1240px, calc(100% - 32px));
@@ -74,6 +78,7 @@ input {
 }
 
 .panel {
+    /* Aparencia comum a cards, modais e blocos de informacao */
     background: var(--panel);
     border: 1px solid var(--panel-border);
     border-radius: var(--radius);
@@ -243,6 +248,7 @@ input {
 
 /* Services Grid */
 .section-head {
+    /* Cabecalho textual da grade principal */
     display: flex;
     justify-content: space-between;
     align-items: end;
@@ -270,6 +276,7 @@ input {
 
 /* Service Card */
 .service-card {
+    /* Card individual de cada servico monitorado */
     padding: 16px;
     cursor: pointer;
 }
@@ -348,6 +355,7 @@ input {
 }
 
 .service-avatar.has-image {
+    /* Quando ha logo, o avatar cresce para valorizar a marca do servico */
     width: 108px;
     height: 108px;
     padding: 10px;
@@ -435,6 +443,7 @@ input {
 
 /* Metrics */
 .metrics-grid {
+    /* Mini grade de metricas exibida dentro do card e no modal */
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
@@ -513,6 +522,7 @@ input {
 
 /* Modal */
 .modal {
+    /* Overlay compartilhado entre detalhes e formulario */
     position: fixed;
     inset: 0;
     padding: 24px;
@@ -576,6 +586,7 @@ input {
 
 /* Form */
 .form-grid {
+    /* Estrutura vertical simples para o formulario de cadastro */
     display: grid;
     gap: 16px;
 }
@@ -629,6 +640,7 @@ input {
 
 /* Responsive */
 @media (max-width: 1100px) {
+    /* Ajustes para tablets e notebooks menores */
     .overview-grid,
     .details-metrics {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -640,6 +652,7 @@ input {
 }
 
 @media (max-width: 900px) {
+    /* Reorganiza header e cards quando a largura fica mais apertada */
     .hero-actions {
         flex-direction: column;
     }
@@ -662,6 +675,7 @@ input {
 }
 
 @media (max-width: 720px) {
+    /* Layout mobile em coluna unica */
     .app-frame {
         width: min(100% - 20px, 100%);
         margin: 14px auto 24px;

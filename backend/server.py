@@ -14,20 +14,25 @@ from .storage import PUBLIC_DIR, SqliteStorage
 HOST = "127.0.0.1"
 PORT = 3000
 
+# Essas instancias sao compartilhadas por todas as requisicoes do processo.
 storage = SqliteStorage()
 monitor = MonitorService(storage=storage)
 
 
 def read_dashboard() -> dict[str, object]:
+    """Le o cadastro e o historico e devolve o payload consolidado do painel."""
     services = storage.load_services()
     history = storage.load_history()
     return build_dashboard_data(services, history)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
+    """Handler HTTP simples que serve API JSON e arquivos estaticos."""
+
     server_version = "PulseBoardPython/1.0"
 
     def do_GET(self) -> None:
+        # GET concentra as consultas usadas pelo frontend para montar a tela.
         parsed = urlparse(self.path)
 
         if parsed.path == "/api/dashboard":
@@ -49,6 +54,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._serve_static(parsed.path)
 
     def do_POST(self) -> None:
+        # POST cria um novo servico e ja dispara uma leitura inicial.
         parsed = urlparse(self.path)
         if parsed.path != "/api/services":
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
@@ -75,6 +81,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json({"message": "Service added", "service": service}, status=HTTPStatus.CREATED)
 
     def do_PUT(self) -> None:
+        # O PUT pode atualizar um servico existente ou persistir a ordem dos cards.
         parsed = urlparse(self.path)
         if parsed.path == "/api/services/reorder":
             payload = self._read_json_body()
@@ -111,6 +118,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json({"message": "Service updated", "service": updated})
 
     def do_DELETE(self) -> None:
+        # Remove cadastro e historico associado do servico.
         parsed = urlparse(self.path)
         if not parsed.path.startswith("/api/services/"):
             self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
@@ -127,9 +135,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json({"message": "Service removed"})
 
     def log_message(self, format: str, *args: object) -> None:
+        # Desliga o log padrao do BaseHTTPRequestHandler para manter o terminal limpo.
         return
 
     def _read_json_body(self) -> dict[str, object]:
+        # Se o cliente enviar corpo invalido, a API responde com payload vazio
+        # e a validacao da rota decide o erro apropriado.
         length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(length) if length else b"{}"
 
@@ -139,6 +150,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return {}
 
     def _send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
+        # Centraliza serializacao e headers JSON da API.
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -147,10 +159,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_static(self, request_path: str) -> None:
+        # Tudo que nao e rota da API cai aqui para servir HTML/CSS/JS.
         relative = "index.html" if request_path in {"", "/"} else request_path.lstrip("/")
         file_path = (PUBLIC_DIR / relative).resolve()
 
         try:
+            # Impede acesso a arquivos fora de /public via path traversal.
             file_path.relative_to(PUBLIC_DIR.resolve())
         except ValueError:
             self._send_json({"error": "Forbidden"}, status=HTTPStatus.FORBIDDEN)
@@ -170,6 +184,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def run(host: str = HOST, port: int = PORT) -> None:
+    """Inicializa o monitor e sobe o servidor HTTP principal."""
     monitor.start()
     server = ThreadingHTTPServer((host, port), RequestHandler)
     print(f"Server running at http://{host}:{port}/")

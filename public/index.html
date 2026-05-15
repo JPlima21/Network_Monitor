@@ -12,10 +12,12 @@
 </head>
 <body>
     <div class="page-shell">
+        <!-- Elementos decorativos de fundo -->
         <div class="ambient ambient-left"></div>
         <div class="ambient ambient-right"></div>
 
         <main class="app-frame">
+            <!-- Cabecalho com contador da proxima atualizacao e CTA principal -->
             <section class="hero panel">
                 <div class="hero-actions">
                     <div class="live-card">
@@ -28,6 +30,7 @@
 
             <section id="overview-grid" class="overview-grid"></section>
 
+            <!-- Area principal da grade de servicos -->
             <section class="section-head">
                 <div>
                     <span class="section-kicker">Serviços monitorados</span>
@@ -40,6 +43,7 @@
         </main>
     </div>
 
+    <!-- Modal de detalhes com metricas e grafico ampliado -->
     <div id="detailsModal" class="modal">
         <div class="modal-card details-modal">
             <div class="details-header">
@@ -68,6 +72,7 @@
         </div>
     </div>
 
+    <!-- Modal de cadastro/edicao de servicos -->
     <div id="addModal" class="modal">
         <div class="modal-card form-modal">
             <div class="form-header">
@@ -110,6 +115,7 @@
         </div>
     </div>
 
+    <!-- Script principal do frontend -->
     <script src="app.js"></script>
 </body>
 </html>

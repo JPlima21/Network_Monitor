@@ -1,3 +1,5 @@
+// Estado global simples do frontend. Aqui fica o snapshot atual do dashboard
+// e os controles necessarios para modais, graficos e arrastar/soltar.
 const state = {
     dashboard: null,
     charts: {},
@@ -10,6 +12,7 @@ const state = {
     savingOrder: false,
 };
 
+// Referencias centralizadas de DOM para evitar buscas repetidas no documento.
 const ui = {
     addServiceButton: document.getElementById("add-service-button"),
     overviewGrid: document.getElementById("overview-grid"),
@@ -39,6 +42,7 @@ const ui = {
 };
 
 function escapeHtml(value) {
+    // Escapa texto antes de injetar em HTML dinamico.
     return String(value ?? "")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -48,6 +52,7 @@ function escapeHtml(value) {
 }
 
 function formatLatency(value) {
+    // Campos sem resposta aparecem com texto amigavel em vez de null.
     return typeof value === "number" ? `${value.toFixed(1)} ms` : "Sem resposta";
 }
 
@@ -65,6 +70,7 @@ function formatDateTime(value) {
 }
 
 function getStatusMeta(status) {
+    // O frontend usa esse mapa para manter textos e classes coerentes.
     if (status === "offline") {
         return { label: "Offline", chipClass: "status-offline", accentClass: "accent-offline" };
     }
@@ -75,6 +81,7 @@ function getStatusMeta(status) {
 }
 
 async function requestJson(url, options) {
+    // Wrapper unico das chamadas HTTP para centralizar tratamento de erro.
     const response = await fetch(url, options);
     if (!response.ok) {
         const payload = await response.json().catch(() => ({ error: "Erro de requisicao." }));
@@ -88,6 +95,7 @@ function updateTimerLabel() {
 }
 
 function renderHeroMeta() {
+    // Atualiza o cabecalho superior com recorte geral do ultimo snapshot.
     const { meta, summary } = state.dashboard;
     ui.lastGlobalUpdate.textContent = `Ultima atualizacao: ${formatDateTime(meta.lastUpdate)}`;
     ui.servicesCaption.textContent =
@@ -96,6 +104,7 @@ function renderHeroMeta() {
 }
 
 function renderOverview() {
+    // Os cards de overview sao derivados apenas do resumo enviado pela API.
     const { summary } = state.dashboard;
     const cards = [
         {
@@ -129,17 +138,21 @@ function renderOverview() {
 }
 
 function destroyMiniCharts() {
+    // Sempre destruimos os charts antigos antes de renderizar novamente para
+    // evitar vazamento de instancias do Chart.js.
     Object.values(state.charts).forEach((chart) => chart.destroy());
     state.charts = {};
 }
 
 function getCurrentGridOrder() {
+    // Le a ordem visual atual dos cards no DOM para persistir a reorganizacao.
     return Array.from(ui.servicesGrid.querySelectorAll(".service-card"))
         .map((card) => card.dataset.serviceId)
         .filter(Boolean);
 }
 
 function renderServiceCard(service) {
+    // Cada card combina status atual, mini grafico e acoes de editar/remover.
     const statusMeta = getStatusMeta(service.status);
     const initials = service.name
         .split(" ")
@@ -202,6 +215,7 @@ function renderServiceCard(service) {
 }
 
 function createMiniChart(service, points) {
+    // O mini grafico exibe tendencia recente de latencia no proprio card.
     const canvas = document.getElementById(`chart-${service.id}`);
     if (!canvas) return;
 
@@ -244,6 +258,7 @@ function createMiniChart(service, points) {
 }
 
 function renderServices() {
+    // Reconstroi toda a grade de servicos com base no snapshot mais novo.
     const { services, history } = state.dashboard;
     destroyMiniCharts();
 
@@ -263,6 +278,7 @@ function renderServices() {
 }
 
 async function persistServiceOrder() {
+    // Depois do drag and drop, a ordem completa vai para o backend.
     const serviceIds = getCurrentGridOrder();
     state.savingOrder = true;
 
@@ -283,6 +299,7 @@ async function persistServiceOrder() {
 }
 
 function bindAvatarFallbacks() {
+    // Se uma imagem quebrar, o avatar volta automaticamente para as iniciais.
     ui.servicesGrid.querySelectorAll(".service-avatar.has-image img").forEach((image) => {
         image.addEventListener("error", () => {
             image.parentElement.classList.remove("has-image");
@@ -292,6 +309,7 @@ function bindAvatarFallbacks() {
 }
 
 function renderLargeChart(service, points) {
+    // Modal de detalhes: grafico ampliado com latencia e linha de limiar.
     const ctx = ui.largeChartCanvas.getContext("2d");
 
     if (state.largeChart) {
@@ -356,6 +374,7 @@ function renderLargeChart(service, points) {
 }
 
 function openDetails(serviceId) {
+    // Abre o modal detalhado do servico selecionado.
     const service = state.dashboard.services.find((item) => item.id === serviceId);
     if (!service) return;
 
@@ -394,6 +413,7 @@ function closeDetails() {
 }
 
 function updateImageHint() {
+    // O texto de ajuda do campo de imagem muda conforme o contexto do formulario.
     const hasSelectedFile = Boolean(ui.serviceImageFile.files && ui.serviceImageFile.files.length);
     const hasStoredImage = Boolean(state.currentFormImageUrl);
 
@@ -411,6 +431,7 @@ function updateImageHint() {
 }
 
 function readImageFileAsDataUrl(file) {
+    // A imagem e armazenada localmente como data URL para simplificar o backend.
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
@@ -420,6 +441,7 @@ function readImageFileAsDataUrl(file) {
 }
 
 function openCreateModal() {
+    // Reseta o formulario para inclusao de um novo servico.
     ui.modalTitle.textContent = "Adicionar servico";
     ui.editServiceId.value = "";
     ui.serviceName.value = "";
@@ -432,6 +454,7 @@ function openCreateModal() {
 }
 
 function openEditModal(serviceId) {
+    // Preenche o formulario com os dados atuais do servico selecionado.
     const service = state.dashboard.services.find((item) => item.id === serviceId);
     if (!service) return;
 
@@ -451,6 +474,7 @@ function closeFormModal() {
 }
 
 async function saveService() {
+    // Reaproveita o mesmo fluxo para criar ou editar, mudando apenas a rota HTTP.
     let imageUrl = state.currentFormImageUrl;
     const selectedFile = ui.serviceImageFile.files && ui.serviceImageFile.files[0];
 
@@ -482,6 +506,7 @@ async function saveService() {
 }
 
 async function removeService(serviceId) {
+    // Confirmacao simples para evitar exclusao acidental.
     if (!confirm("Deseja remover este servico do monitoramento?")) {
         return;
     }
@@ -491,6 +516,7 @@ async function removeService(serviceId) {
 }
 
 function handleGridDragStart(event) {
+    // O drag comeca apenas quando o usuario arrasta o card, nao os botoes internos.
     const card = event.target.closest(".service-card");
     if (!card || event.target.closest("button")) {
         event.preventDefault();
@@ -506,6 +532,7 @@ function handleGridDragStart(event) {
 }
 
 function handleGridDragOver(event) {
+    // Reposiciona visualmente o card durante o arraste com base no ponteiro.
     if (!state.draggedServiceId) {
         return;
     }
@@ -533,12 +560,14 @@ function handleGridDragOver(event) {
 }
 
 function handleGridDrop(event) {
+    // O drop so precisa impedir o comportamento padrao do navegador.
     if (state.draggedServiceId) {
         event.preventDefault();
     }
 }
 
 async function handleGridDragEnd(event) {
+    // Ao finalizar o arraste, compara ordem antiga e nova antes de salvar.
     const card = event.target.closest(".service-card");
     if (card) {
         card.classList.remove("is-dragging");
@@ -564,6 +593,7 @@ async function handleGridDragEnd(event) {
 }
 
 function handleServiceGridClick(event) {
+    // Usa delegacao de eventos para tratar todos os cards pelo mesmo listener.
     if (state.suppressNextCardClick) {
         state.suppressNextCardClick = false;
         return;
@@ -590,6 +620,7 @@ function handleServiceGridClick(event) {
 }
 
 function bindEvents() {
+    // Todos os listeners principais do app sao registrados aqui.
     ui.addServiceButton.addEventListener("click", openCreateModal);
     ui.closeDetailsButton.addEventListener("click", closeDetails);
     ui.closeFormButton.addEventListener("click", closeFormModal);
@@ -616,6 +647,7 @@ function bindEvents() {
 }
 
 async function fetchDashboard() {
+    // Busca o snapshot consolidado no backend e redesenha a tela inteira.
     state.dashboard = await requestJson("/api/dashboard");
     state.countdown = state.dashboard.meta?.nextUpdateSeconds || 30;
     renderHeroMeta();
@@ -624,6 +656,7 @@ async function fetchDashboard() {
 }
 
 function startRefreshLoop() {
+    // O frontend nao calcula metricas; apenas agenda a proxima leitura da API.
     setInterval(async () => {
         state.countdown -= 1;
         if (state.countdown <= 0) {
@@ -639,6 +672,7 @@ function startRefreshLoop() {
 }
 
 async function bootstrap() {
+    // Sequencia inicial de boot da pagina.
     bindEvents();
     startRefreshLoop();
 
@@ -655,4 +689,5 @@ async function bootstrap() {
     }
 }
 
+// Dispara a inicializacao da aplicacao assim que o script e carregado.
 bootstrap();

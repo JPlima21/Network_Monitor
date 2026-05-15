@@ -4,6 +4,7 @@ from typing import Any
 
 
 def average(values: list[float]) -> float | None:
+    """Calcula a media arredondada usada nos cards de resumo."""
     if not values:
         return None
     return round(sum(values) / len(values), 2)
@@ -13,13 +14,16 @@ def build_dashboard_data(
     services: list[dict[str, Any]],
     history: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
+    """Monta o payload consumido pelo frontend a partir de servicos e historico."""
     snapshots: list[dict[str, Any]] = []
 
     for service in services:
+        # Cada card do painel usa a ultima medicao do servico como snapshot atual.
         entries = history.get(service["id"], [])
         latest = entries[-1] if entries else None
 
         if latest is None:
+            # Se ainda nao ha medicao, o frontend recebe um estado neutro/offline.
             snapshots.append(
                 {
                     "id": service["id"],
@@ -44,6 +48,8 @@ def build_dashboard_data(
             )
             continue
 
+        # Quando ha historico, o dashboard combina metadados atuais do cadastro
+        # com a ultima leitura persistida pelo monitor.
         snapshots.append(
             {
                 "id": service["id"],
@@ -67,6 +73,7 @@ def build_dashboard_data(
             }
         )
 
+    # O historico e normalizado para o formato que o grafico do frontend espera.
     normalized_history = {
         service["id"]: [
             {
@@ -84,6 +91,7 @@ def build_dashboard_data(
         for service in services
     }
 
+    # Os agregados abaixo alimentam os cards superiores do dashboard.
     last_updates = [service["lastUpdate"] for service in snapshots if service["lastUpdate"]]
     latency_values = [service["avgLatencyMs"] for service in snapshots if isinstance(service["avgLatencyMs"], (int, float))]
     stability_values = [service["stabilityPct"] for service in snapshots if isinstance(service["stabilityPct"], (int, float))]

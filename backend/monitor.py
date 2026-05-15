@@ -16,10 +16,12 @@ PING_PATTERN = re.compile(r"(?:tempo|time)\s*[=<]?\s*(\d+(?:[.,]\d+)?)\s*ms", re
 
 
 def parse_ping_times(output: str) -> list[float]:
+    """Extrai os tempos retornados pelo comando ping em Windows ou Unix."""
     return [float(value.replace(",", ".")) for value in PING_PATTERN.findall(output)]
 
 
 def calculate_jitter(latencies: list[float]) -> float | None:
+    """Usa a variacao media entre amostras consecutivas como jitter simples."""
     if len(latencies) < 2:
         return None
 
@@ -28,6 +30,7 @@ def calculate_jitter(latencies: list[float]) -> float | None:
 
 
 def ping_host(host: str, count: int, timeout_ms: int) -> dict[str, Any]:
+    """Executa o ping do sistema operacional e normaliza o resultado."""
     if sys.platform == "win32":
         command = ["ping", "-n", str(count), "-w", str(timeout_ms), host]
     else:
@@ -56,6 +59,7 @@ def ping_host(host: str, count: int, timeout_ms: int) -> dict[str, Any]:
             "samples_ms": [],
         }
 
+    # O parser considera cada tempo encontrado como um pacote respondido.
     output = "\n".join(part for part in [completed.stdout, completed.stderr] if part)
     latencies = parse_ping_times(output)
     received = len(latencies)
@@ -88,6 +92,7 @@ def ping_host(host: str, count: int, timeout_ms: int) -> dict[str, Any]:
 
 
 def resolve_status(online: bool, avg_latency_ms: float | None, threshold: int | None) -> str:
+    """Traduz disponibilidade e latencia em um status visual do painel."""
     if not online:
         return "offline"
     if threshold is not None and avg_latency_ms is not None and avg_latency_ms >= threshold:
@@ -119,6 +124,7 @@ class MonitorService:
         self._cycle_lock = threading.Lock()
 
     def start(self) -> None:
+        # Evita subir duas threads do monitor ao mesmo tempo.
         if self._thread and self._thread.is_alive():
             return
 
@@ -127,16 +133,19 @@ class MonitorService:
         self._thread.start()
 
     def stop(self) -> None:
+        # Sinaliza parada e espera rapidamente a thread encerrar.
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=2)
 
     def _run_loop(self) -> None:
+        # Loop principal: mede, espera o intervalo e repete ate o processo encerrar.
         while not self._stop_event.is_set():
             self.run_cycle()
             self._stop_event.wait(self.interval_seconds)
 
     def _reset_history_if_due(self) -> None:
+        # O historico e reiniciado a cada 24h para manter a janela do painel enxuta.
         now = datetime.now(timezone.utc)
         last_reset = self.storage.get_last_reset()
 
@@ -152,9 +161,12 @@ class MonitorService:
         self.storage.set_last_reset(now)
 
     def run_cycle(self, service_ids: set[str] | None = None) -> None:
+        # Quando service_ids e informado, o ciclo mede apenas os servicos alterados.
         requested_ids = set(service_ids) if service_ids else None
 
         with self._cycle_lock:
+            # O lock impede sobreposicao entre o monitor automatico e leituras
+            # disparadas manualmente pela API.
             self._reset_history_if_due()
             services = self.storage.load_services()
             existing_ids = {str(service["id"]) for service in services}
@@ -170,6 +182,7 @@ class MonitorService:
                 if not all(key in service for key in ("id", "name", "host")):
                     continue
 
+                # Cada iteracao produz uma nova entrada historica completa.
                 result = ping_host(service["host"], self.ping_count, self.timeout_ms)
                 entry = self._build_entry(service, result)
                 persisted_entry = self.storage.append_history_entry(
@@ -183,6 +196,8 @@ class MonitorService:
                 self.current_status[service_id] = persisted_entry
 
     def _build_entry(self, service: dict[str, Any], ping_result: dict[str, Any]) -> dict[str, Any]:
+        # A entrada persistida preserva tanto as metricas quanto o threshold vigente
+        # naquele instante, para o historico nao "mudar o passado" depois.
         timestamp = datetime.now(timezone.utc).isoformat()
         threshold = service.get("threshold")
 

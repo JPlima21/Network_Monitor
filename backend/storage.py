@@ -36,6 +36,7 @@ DEFAULT_SERVICES = [
 
 
 def _slugify_name(name: str) -> str:
+    # Gera um identificador amigavel para URLs e chave primaria do servico.
     normalized = "".join(char.lower() if char.isalnum() else "-" for char in name.strip())
     compact = "-".join(part for part in normalized.split("-") if part)
     return compact or "service"
@@ -45,6 +46,7 @@ class SqliteStorage:
     """SQLite-backed storage with a process-wide lock."""
 
     def __init__(self) -> None:
+        # Garante a estrutura minima de pastas antes de abrir o banco.
         self._lock = threading.RLock()
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,6 +66,7 @@ class SqliteStorage:
         params: tuple[Any, ...] = (),
         commit: bool = False,
     ) -> sqlite3.Cursor:
+        # Pequeno retry para reduzir falhas eventuais de "database is locked".
         import time
 
         with self._lock:
@@ -80,6 +83,7 @@ class SqliteStorage:
                     raise
 
     def _ensure_tables(self) -> None:
+        # services guarda o cadastro atual; history guarda as medicoes ao longo do tempo.
         self._execute(
             """
             CREATE TABLE IF NOT EXISTS services (
@@ -119,6 +123,7 @@ class SqliteStorage:
         self._ensure_history_columns()
 
     def _ensure_service_columns(self) -> None:
+        # A verificacao por coluna permite evoluir o schema sem recriar o banco.
         columns = {
             row["name"]
             for row in self._execute("PRAGMA table_info(services)").fetchall()
@@ -137,6 +142,7 @@ class SqliteStorage:
             self._backfill_service_order()
 
     def _backfill_service_order(self) -> None:
+        # Em bancos antigos, atribui uma ordem inicial consistente aos cards.
         rows = self._connection.execute(
             "SELECT id FROM services ORDER BY name ASC, id ASC"
         ).fetchall()
@@ -147,6 +153,7 @@ class SqliteStorage:
         self._connection.commit()
 
     def _ensure_history_columns(self) -> None:
+        # O threshold tambem vai para o historico para preservar o contexto da leitura.
         columns = {
             row["name"]
             for row in self._execute("PRAGMA table_info(history)").fetchall()
@@ -159,6 +166,7 @@ class SqliteStorage:
             )
 
     def _read_json(self, file_path: Path, default: Any) -> Any:
+        # Mantem compatibilidade com a versao antiga baseada em JSON.
         if not file_path.exists():
             return default
 
@@ -169,6 +177,7 @@ class SqliteStorage:
             return default
 
     def _migrate_from_json(self) -> None:
+        # Na primeira execucao com SQLite, importa servicos e historico legados.
         services = self.load_services()
         if not services:
             services = self._read_json(SERVICES_FILE, list(DEFAULT_SERVICES))
@@ -186,6 +195,7 @@ class SqliteStorage:
             self.save_history(history)
 
     def load_services(self) -> list[dict[str, Any]]:
+        # A ordem salva pelo usuario define a ordem de renderizacao no frontend.
         cursor = self._execute(
             """
             SELECT id, name, host, threshold, image_url, sort_order
@@ -206,6 +216,7 @@ class SqliteStorage:
         ]
 
     def save_services(self, services: list[dict[str, Any]]) -> None:
+        # Sincronizacao em lote usada principalmente na migracao inicial.
         with self._lock:
             self._connection.executemany(
                 """
@@ -239,6 +250,7 @@ class SqliteStorage:
         threshold: int = 100,
         image_url: str = "",
     ) -> dict[str, Any]:
+        # O novo servico sempre entra no final da ordem atual da grid.
         with self._lock:
             existing_ids = {
                 row["id"]
@@ -282,6 +294,7 @@ class SqliteStorage:
             return service
 
     def update_service(self, service_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        # Atualiza apenas campos permitidos, preservando o restante do cadastro.
         with self._lock:
             row = self._connection.execute(
                 "SELECT id, name, host, threshold, image_url, sort_order FROM services WHERE id = ?",
@@ -331,6 +344,7 @@ class SqliteStorage:
             return updated
 
     def reorder_services(self, service_ids: list[str]) -> list[dict[str, Any]]:
+        # O frontend envia a lista completa para evitar reordenacoes parciais ambiguas.
         with self._lock:
             existing_rows = self._connection.execute(
                 "SELECT id FROM services"
@@ -350,6 +364,7 @@ class SqliteStorage:
         return self.load_services()
 
     def load_history(self) -> dict[str, list[dict[str, Any]]]:
+        # Reconstrui o historico agrupado por servico para alimentar os graficos.
         cursor = self._execute(
             "SELECT * FROM history ORDER BY service_id, timestamp ASC"
         )
@@ -380,6 +395,7 @@ class SqliteStorage:
                 }
             )
 
+        # O historico guarda metricas; os metadados atuais do servico sao reidratados aqui.
         services = self.load_services()
         service_by_id = {service["id"]: service for service in services}
         for service_entries in history.values():
@@ -394,6 +410,7 @@ class SqliteStorage:
         return history
 
     def save_history(self, history: dict[str, list[dict[str, Any]]]) -> None:
+        # Gravacao completa usada na migracao do historico legado.
         with self._lock:
             cursor = self._connection.execute("SELECT id FROM services")
             existing_service_ids = {row["id"] for row in cursor.fetchall()}
@@ -456,6 +473,7 @@ class SqliteStorage:
         max_entries: int,
         stability_window: int,
     ) -> dict[str, Any] | None:
+        # Caminho principal do monitor: acrescenta somente a nova leitura.
         service_id = str(entry["service"]["id"])
         service_threshold = entry["service"].get("threshold")
         window = max(1, stability_window)
@@ -480,6 +498,7 @@ class SqliteStorage:
             ).fetchall()
             online_flags = [bool(row["online"]) for row in reversed(recent_rows)]
             online_flags.append(bool(entry["online"]))
+            # A estabilidade representa a proporcao de leituras online na janela recente.
             stability_pct = round((sum(online_flags) / len(online_flags)) * 100, 2)
 
             persisted_entry = {
@@ -529,6 +548,7 @@ class SqliteStorage:
             )
 
             if max_entries > 0:
+                # Mantem apenas as leituras mais recentes por servico para o banco nao crescer indefinidamente.
                 self._connection.execute(
                     """
                     DELETE FROM history
@@ -547,6 +567,7 @@ class SqliteStorage:
             return persisted_entry
 
     def clear_history(self) -> None:
+        # Usado no reset diario do painel.
         with self._lock:
             self._connection.execute("DELETE FROM history")
             self._connection.commit()
@@ -556,12 +577,14 @@ class SqliteStorage:
         return cursor.fetchone() is not None
 
     def delete_service(self, service_id: str) -> bool:
+        # A FK em history com ON DELETE CASCADE remove o historico junto.
         with self._lock:
             cursor = self._connection.execute("DELETE FROM services WHERE id = ?", (service_id,))
             self._connection.commit()
             return cursor.rowcount > 0
 
     def get_last_reset(self) -> datetime | None:
+        # O carimbo de reset fica em arquivo simples para nao misturar com a tabela historica.
         try:
             if not LAST_RESET_FILE.exists():
                 return None
@@ -575,6 +598,7 @@ class SqliteStorage:
             return None
 
     def set_last_reset(self, ts: datetime) -> None:
+        # Falhas aqui nao podem derrubar o monitor; por isso o write e tolerante.
         try:
             LAST_RESET_FILE.write_text(ts.astimezone(timezone.utc).isoformat(), encoding="utf-8")
         except Exception:
